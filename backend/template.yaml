@@ -1,0 +1,415 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mortgage Product Copilot backend
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  AllowedOrigins:
+    Type: String
+    Default: 'https://example.amplifyapp.com'
+  OpenAISecretArn:
+    Type: String
+  OpenAIModel:
+    Type: String
+    Default: gpt-4.1-mini
+  GoogleClientId:
+    Type: String
+    Default: ''
+  GoogleClientSecretParameterOrSecretArn:
+    Type: String
+    Default: ''
+  CognitoDomainPrefix:
+    Type: String
+    Default: mortgage-product-copilot
+  FrontendCallbackUrls:
+    Type: CommaDelimitedList
+    Default: 'https://example.amplifyapp.com/oauth/callback'
+  FrontendLogoutUrls:
+    Type: CommaDelimitedList
+    Default: 'https://example.amplifyapp.com/'
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Conditions:
+  IsProd: !Equals [!Ref EnvironmentName, prod]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.13
+    Tracing: Active
+    Environment:
+      Variables:
+        STAGE: !Ref EnvironmentName
+        DYNAMODB_TABLE_NAME: !Ref MortgageProductTable
+        OPENAI_MODEL: !Ref OpenAIModel
+        OPENAI_SECRET_ARN: !Ref OpenAISecretArn
+        ALLOWED_ORIGINS: !Ref AllowedOrigins
+        AWS_REGION: !Ref AWS::Region
+        LOG_LEVEL: INFO
+
+Resources:
+  MortgageProductTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub MortgageProductCopilot-${EnvironmentName}
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProd, true, false]
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref EnvironmentName
+      CorsConfiguration:
+        AllowOrigins: !Split [',', !Ref AllowedOrigins]
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+          - authorization
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
+            IdentitySource:
+              - $request.header.Authorization
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/health
+      Handler: app.handler
+      Policies:
+        - CloudWatchLogsFullAccess
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /health
+            Method: get
+
+  ProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/products
+      Handler: app.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !GetAtt MortgageProductTable.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref OpenAISecretArn
+        - CloudWatchLogsFullAccess
+      Events:
+        ListProducts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /products
+            Method: get
+        GetProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /products/{productId}
+            Method: get
+        CreateProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/products
+            Method: post
+        UpdateProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/products/{productId}
+            Method: put
+        DeleteProduct:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/products/{productId}
+            Method: delete
+        ImportProducts:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /admin/products/import
+            Method: post
+
+  ScenariosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/scenarios
+      Handler: app.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !GetAtt MortgageProductTable.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref OpenAISecretArn
+        - CloudWatchLogsFullAccess
+      Events:
+        AnalyzeScenario:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /scenarios/analyze
+            Method: post
+
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/chat
+      Handler: app.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !GetAtt MortgageProductTable.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref OpenAISecretArn
+        - CloudWatchLogsFullAccess
+      Events:
+        Chat:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /chat
+            Method: post
+
+  ConversationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/conversations
+      Handler: app.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+              Resource: !GetAtt MortgageProductTable.Arn
+        - CloudWatchLogsFullAccess
+      Events:
+        ListConversations:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /conversations
+            Method: get
+        GetConversation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /conversations/{conversationId}
+            Method: get
+        DeleteConversation:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /conversations/{conversationId}
+            Method: delete
+
+  UsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/users
+      Handler: app.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt MortgageProductTable.Arn
+        - CloudWatchLogsFullAccess
+      Events:
+        CurrentUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /users/me
+            Method: get
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub mortgage-product-copilot-${EnvironmentName}
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub mortgage-product-copilot-${EnvironmentName}
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !Ref FrontendCallbackUrls
+      LogoutURLs: !Ref FrontendLogoutUrls
+      SupportedIdentityProviders:
+        - COGNITO
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub ${CognitoDomainPrefix}-${EnvironmentName}
+      UserPoolId: !Ref UserPool
+
+  AdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      UserPoolId: !Ref UserPool
+      Description: Mortgage product administration
+
+  UsersGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Users
+      UserPoolId: !Ref UserPool
+      Description: Standard users
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecretParameterOrSecretArn
+        authorize_scopes: email openid profile
+      AttributeMapping:
+        email: email
+        preferred_username: email
+        given_name: given_name
+        family_name: family_name
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/mortgage-product-copilot-${EnvironmentName}
+      RetentionInDays: !Ref LogRetentionDays
+
+  ProductsErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub mortgage-product-copilot-products-errors-${EnvironmentName}
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ProductsFunction
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      EvaluationPeriods: 1
+      Period: 300
+      Statistic: Sum
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  CognitoHostedUiDomain:
+    Value: !Sub https://${UserPoolDomain}.auth.${AWS::Region}.amazonaws.com
+  DynamoDbTableName:
+    Value: !Ref MortgageProductTable
+  Region:
+    Value: !Ref AWS::Region

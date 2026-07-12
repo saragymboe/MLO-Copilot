@@ -1,0 +1,9 @@
+version = 0.1
+[default.global.parameters]
+stack_name = "mortgage-product-copilot"
+
+[default.deploy.parameters]
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+region = "us-east-1"
+parameter_overrides = "EnvironmentName=dev OpenAISecretArn=replace-me"

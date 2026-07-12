@@ -1,0 +1,23 @@
+name: Pull Request
+on:
+  pull_request:
+    branches: [develop, main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+      - run: pip install -r backend/requirements.txt
+      - run: cd backend && PYTHONPATH=src pytest -q tests/unit
+      - run: cd backend && sam validate --lint
+      - run: cd frontend && npm ci && npm run lint && npm run test && npm run build

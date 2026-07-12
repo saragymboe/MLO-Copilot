@@ -1,0 +1,4 @@
+{
+  "body": "{"scenario": {"borrowerScenario": "Self-employed borrower with one year in business", "state": "CA", "transactionType": "purchase", "occupancy": "primary", "propertyType": "single_family", "employmentType": "self_employed", "incomeDocumentation": "bank_statement"}}",
+  "requestContext": {"requestId": "local", "http": {"method": "POST"}, "authorizer": {"jwt": {"claims": {"sub": "local-user", "cognito:groups": "Users"}}}}
+}
