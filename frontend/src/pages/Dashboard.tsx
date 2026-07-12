@@ -1,11 +1,11 @@
-import { Grid, Paper, Typography } from '@mui/material';
-import { Link } from 'react-router-dom';
-import { DisclaimerBanner } from '../components/DisclaimerBanner';
+import { Grid, Paper, Typography } from "@mui/material";
+import { Link } from "react-router-dom";
+import { DisclaimerBanner } from "../components/DisclaimerBanner";
 
 const cards = [
-  { title: 'Search Products', path: '/products' },
-  { title: 'Analyze Borrower Scenario', path: '/scenarios' },
-  { title: 'Ask Product Assistant', path: '/chat' },
+  { title: "Search Products", path: "/products" },
+  { title: "Analyze Borrower Scenario", path: "/scenarios" },
+  { title: "Ask Product Assistant", path: "/chat" },
 ];
 
 export function DashboardPage() {

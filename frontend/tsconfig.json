@@ -2,7 +2,8 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["es2020", "dom", "dom.iterable", "webworker"],
+    "types": ["vite/client", "vitest", "jest", "node"],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,

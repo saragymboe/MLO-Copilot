@@ -12,7 +12,8 @@ export function configureAuth() {
     Auth: {
       Cognito: {
         userPoolId,
-        userPoolClientId,
+        userPoolClientId: userPoolClientId,
+        userPoolEndpoint: undefined,
         loginWith: {
           oauth: {
             domain,
@@ -24,6 +25,5 @@ export function configureAuth() {
         },
       },
     },
-    region,
   });
 }
